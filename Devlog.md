@@ -49,3 +49,15 @@ Plan
 
 Write split_child and insert_non_full functions.
 Handle key shifting, child shifting, and writing updated blocks.
+
+# Session 5 - DEC 10, 3:00 PM
+
+Thoughts
+
+Insertion works in parts, but root splits still need their logic.
+This step will complete the core insert implementation.
+
+Plan
+
+Add code for splitting the root and creating a new root node.
+Connect everything so insert_non_full can be used normally.

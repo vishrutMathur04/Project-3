@@ -175,4 +175,46 @@ class Node:
 
             insert_non_full(f, header, child, key, value)
 
+            
+
+    def cmd_insert(filename, key, value):
+        if not os.path.exists(filename):
+            print("Error: File missing.")
+            sys.exit(1)
+
+        with open(filename, "r+b") as f:
+            header = Header.from_bytes(read_bytes(f, 0))
+
+            if header.root_id == 0:
+                rid = header.next_block_id
+                header.next_block_id += 1
+                root = Node(rid)
+                root.num_keys = 1
+                root.keys[0] = key
+                root.values[0] = value
+                header.root_id = rid
+                write_bytes(f, rid, root.to_bytes())
+                write_bytes(f, 0, header.to_bytes())
+                return
+
+            root = Node.from_bytes(read_bytes(f, header.root_id))
+
+            if root.num_keys == MAX_KEYS:
+                new_root_id = header.next_block_id
+                header.next_block_id += 1
+                new_root = Node(new_root_id)
+                new_root.children[0] = root.block_id
+                root.parent_id = new_root_id
+                header.root_id = new_root_id
+
+                write_bytes(f, 0, header.to_bytes())
+                write_bytes(f, new_root_id, new_root.to_bytes())
+
+                split_child(f, header, new_root, 0, root)
+                insert_non_full(f, header, new_root, key, value)
+            else:
+                insert_non_full(f, header, root, key, value)
+
+
+
 
