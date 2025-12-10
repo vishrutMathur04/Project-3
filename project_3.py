@@ -30,3 +30,42 @@ class Header:
         if magic != MAGIC_NUMBER:
             raise ValueError("Invalid magic")
         return cls(r, n)
+
+
+
+DEGREE = 10
+MAX_KEYS = 19
+MAX_CHILDREN = 20
+
+class Node:
+    def __init__(self, block_id, parent_id=0):
+        self.block_id = block_id
+        self.parent_id = parent_id
+        self.num_keys = 0
+        self.keys = [0]*MAX_KEYS
+        self.values = [0]*MAX_KEYS
+        self.children = [0]*MAX_CHILDREN
+
+    def is_leaf(self):
+        return self.children[0] == 0
+
+    def to_bytes(self):
+        buf = struct.pack(">QQQ", self.block_id, self.parent_id, self.num_keys)
+        buf += struct.pack(f">{MAX_KEYS}Q", *self.keys)
+        buf += struct.pack(f">{MAX_KEYS}Q", *self.values)
+        buf += struct.pack(f">{MAX_CHILDREN}Q", *self.children)
+        return buf
+
+    @classmethod
+    def from_bytes(cls, data):
+        bid, pid, nk = struct.unpack(">QQQ", data[:24])
+        node = cls(bid, pid)
+        node.num_keys = nk
+        off = 24
+        node.keys = list(struct.unpack(f">{MAX_KEYS}Q", data[off:off+MAX_KEYS*8]))
+        off += MAX_KEYS*8
+        node.values = list(struct.unpack(f">{MAX_KEYS}Q", data[off:off+MAX_KEYS*8]))
+        off += MAX_KEYS*8
+        node.children = list(struct.unpack(f">{MAX_CHILDREN}Q", data[off:off+MAX_CHILDREN*8]))
+        return node
+
