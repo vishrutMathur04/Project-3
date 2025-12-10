@@ -214,6 +214,51 @@ class Node:
                 insert_non_full(f, header, new_root, key, value)
             else:
                 insert_non_full(f, header, root, key, value)
+                def cmd_search(filename, key):
+    if not os.path.exists(filename):
+        print("Error: File not found.")
+        sys.exit(1)
+
+    with open(filename, "rb") as f:
+        h = Header.from_bytes(read_bytes(f, 0))
+        if h.root_id == 0:
+            print("Error: Key not found.")
+            return
+
+        cid = h.root_id
+        while True:
+            node = Node.from_bytes(read_bytes(f, cid))
+            i = 0
+            while i < node.num_keys and key > node.keys[i]:
+                i += 1
+            if i < node.num_keys and node.keys[i] == key:
+                print(f"{node.keys[i]}: {node.values[i]}")
+                return
+            if node.is_leaf():
+                print("Error: Key not found.")
+                return
+            cid = node.children[i]
+
+    def traversal_helper(f, block_id, out=None):
+        if block_id == 0:
+            return
+        node = Node.from_bytes(read_bytes(f, block_id))
+
+        keys = node.keys[:node.num_keys]
+        values = node.values[:node.num_keys]
+        children = node.children[:node.num_keys+1]
+        leaf = node.is_leaf()
+
+        for i in range(len(keys)):
+            if not leaf:
+                traversal_helper(f, children[i], out)
+            if out is None:
+                print(f"{keys[i]}: {values[i]}")
+            else:
+                out.append((keys[i], values[i]))
+        if not leaf:
+            traversal_helper(f, children[len(keys)], out)
+
 
 
 

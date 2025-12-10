@@ -61,3 +61,15 @@ Plan
 
 Add code for splitting the root and creating a new root node.
 Connect everything so insert_non_full can be used normally.
+
+# Session 6 - DEC 10, 5:00 PM
+
+Thoughts
+
+Time to add searching and traversal so we can inspect tree contents.
+Both operations should only load nodes when needed.
+
+Plan
+
+Implement search according to B-tree logic.
+Add inorder traversal that respects the 3-node memory limit.
