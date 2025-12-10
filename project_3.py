@@ -69,3 +69,35 @@ class Node:
         node.children = list(struct.unpack(f">{MAX_CHILDREN}Q", data[off:off+MAX_CHILDREN*8]))
         return node
 
+    # (previous code unchanged above)
+
+    def cmd_create(filename):
+        if os.path.exists(filename):
+            print("Error: File exists.")
+            sys.exit(1)
+        with open(filename, "wb") as f:
+            h = Header()
+            write_bytes(f, 0, h.to_bytes())
+
+    def cmd_insert(filename, key, value):
+        if not os.path.exists(filename):
+            print("Error: File missing.")
+            sys.exit(1)
+
+        with open(filename, "r+b") as f:
+            h = Header.from_bytes(read_bytes(f, 0))
+
+            # empty tree
+            if h.root_id == 0:
+                rid = h.next_block_id
+                root = Node(rid)
+                root.num_keys = 1
+                root.keys[0] = key
+                root.values[0] = value
+                h.root_id = rid
+                h.next_block_id += 1
+                write_bytes(f, rid, root.to_bytes())
+                write_bytes(f, 0, h.to_bytes())
+                return
+
+

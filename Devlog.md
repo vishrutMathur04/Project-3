@@ -22,3 +22,16 @@ Plan
 
 Implement the Node class with full binary serialization.
 Match the exact offsets for keys, values, and children.
+
+
+# Session 3 - DEC 10, 1:15 AM
+
+Thoughts
+
+With node storage defined, the next step is initializing an empty tree.
+I need to support create and the very first insert.
+
+Plan
+
+Write the create command and implement inserting into an empty index.
+Ensure header updates correctly when root is created.
