@@ -35,3 +35,17 @@ Plan
 
 Write the create command and implement inserting into an empty index.
 Ensure header updates correctly when root is created.
+
+
+# Session 4 - DEC 10, 1:35 AM
+
+Thoughts
+
+A full B-tree insert requires splitting, so complexity increases now.
+I feel this is the most difficult and most technical part of the project.
+This will be my last commit for tonight, will continue tomorrow now.
+
+Plan
+
+Write split_child and insert_non_full functions.
+Handle key shifting, child shifting, and writing updated blocks.

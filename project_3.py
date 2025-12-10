@@ -100,4 +100,79 @@ class Node:
                 write_bytes(f, 0, h.to_bytes())
                 return
 
+    
+
+    def split_child(f, header, parent, i, child):
+        z_id = header.next_block_id
+        header.next_block_id += 1
+        z = Node(z_id, parent.block_id)
+
+        median = DEGREE - 1  # index 9
+
+        # move keys
+        z.num_keys = DEGREE - 1
+        for j in range(DEGREE-1):
+            z.keys[j] = child.keys[j+DEGREE]
+            z.values[j] = child.values[j+DEGREE]
+            child.keys[j+DEGREE] = 0
+            child.values[j+DEGREE] = 0
+
+        # move children
+        if not child.is_leaf():
+            for j in range(DEGREE):
+                z.children[j] = child.children[j+DEGREE]
+                child.children[j+DEGREE] = 0
+
+        child.num_keys = DEGREE - 1
+
+        # shift parent children
+        for j in range(parent.num_keys, i, -1):
+            parent.children[j+1] = parent.children[j]
+        parent.children[i+1] = z_id
+
+        # shift parent keys
+        for j in range(parent.num_keys, i, -1):
+            parent.keys[j] = parent.keys[j-1]
+            parent.values[j] = parent.values[j-1]
+
+        parent.keys[i] = child.keys[median]
+        parent.values[i] = child.values[median]
+        parent.num_keys += 1
+
+        child.keys[median] = 0
+        child.values[median] = 0
+
+        write_bytes(f, 0, header.to_bytes())
+        write_bytes(f, child.block_id, child.to_bytes())
+        write_bytes(f, z.block_id, z.to_bytes())
+        write_bytes(f, parent.block_id, parent.to_bytes())
+
+    def insert_non_full(f, header, node, key, value):
+        i = node.num_keys - 1
+
+        if node.is_leaf():
+            while i >= 0 and key < node.keys[i]:
+                node.keys[i+1] = node.keys[i]
+                node.values[i+1] = node.values[i]
+                i -= 1
+            node.keys[i+1] = key
+            node.values[i+1] = value
+            node.num_keys += 1
+            write_bytes(f, node.block_id, node.to_bytes())
+        else:
+            while i >= 0 and key < node.keys[i]:
+                i -= 1
+            i += 1
+            cid = node.children[i]
+            child = Node.from_bytes(read_bytes(f, cid))
+
+            if child.num_keys == MAX_KEYS:
+                split_child(f, header, node, i, child)
+                if key > node.keys[i]:
+                    i += 1
+                cid = node.children[i]
+                child = Node.from_bytes(read_bytes(f, cid))
+
+            insert_non_full(f, header, child, key, value)
+
 
