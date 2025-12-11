@@ -86,7 +86,7 @@ Plan
 Implement print and extract using traversal results.
 Implement load by reading CSV and calling insert repeatedly.
 
-# Session 8 - DEC 10, 5:45 PM
+# Session 8 - DEC 10, 6:45 PM
 
 Thoughts
 
@@ -100,3 +100,20 @@ Finalize file and ensure commands behave exactly as required.
 Change the code a bit, make it reader friendly.
 Verified the code, checked if everything is there including all the functions.
 Next I will do some testing
+
+# Session 9 - DEC 10, 8:30 PM
+
+Thoughts
+
+The code looks good and all clean and I think its working perfectly. 
+Some of the tests I am thinking to do is first create the file test.idx
+And then insert them and then try to sort it.
+
+Plan
+
+The plan is to first insert 4 tests and then sort them..It seems 
+to be able to sort and the expected output came perfectly.
+1: 5
+7: 50
+15: 100
+30: 600
