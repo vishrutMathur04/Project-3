@@ -73,3 +73,15 @@ Plan
 
 Implement search according to B-tree logic.
 Add inorder traversal that respects the 3-node memory limit.
+
+# Session 7 - DEC 10, 5:45 PM
+
+Thoughts
+
+Only the input/output utilities remain: print, extract, load.
+These rely on traversal but add file formatting.
+
+Plan
+
+Implement print and extract using traversal results.
+Implement load by reading CSV and calling insert repeatedly.

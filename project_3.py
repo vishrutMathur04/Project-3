@@ -260,6 +260,54 @@ class Node:
             traversal_helper(f, children[len(keys)], out)
 
 
+            def cmd_print(filename):
+    if not os.path.exists(filename):
+        print("Error: File not found.")
+        sys.exit(1)
+    with open(filename, "rb") as f:
+        h = Header.from_bytes(read_bytes(f, 0))
+        if h.root_id != 0:
+            traversal_helper(f, h.root_id)
+
+    def cmd_extract(filename, out_csv):
+        if not os.path.exists(filename):
+            print("Error: File missing.")
+            sys.exit(1)
+        if os.path.exists(out_csv):
+            print("Error: CSV exists.")
+            sys.exit(1)
+
+        results = []
+        with open(filename, "rb") as f:
+            h = Header.from_bytes(read_bytes(f, 0))
+            if h.root_id != 0:
+                traversal_helper(f, h.root_id, results)
+
+        with open(out_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            for k, v in results:
+                w.writerow([k, v])
+
+    def cmd_load(filename, csv_file):
+        if not os.path.exists(filename):
+            print("Error: File missing.")
+            sys.exit(1)
+        if not os.path.exists(csv_file):
+            print("Error: CSV missing.")
+            sys.exit(1)
+
+        pairs = []
+        with open(csv_file) as f:
+            r = csv.reader(f)
+            for row in r:
+                if row:
+                    pairs.append((int(row[0]), int(row[1])))
+
+        for k, v in pairs:
+            cmd_insert(filename, k, v)
+
+
+
 
 
 
