@@ -117,3 +117,12 @@ to be able to sort and the expected output came perfectly.
 7: 50
 15: 100
 30: 600
+
+# Session 10 - DEC 10, 9:45 PM
+
+Thoughts
+Need to do Search, Extract and Load together
+
+Plan
+Tested Search, Extract and Load together or simueltaneously.
+Everything works
