@@ -3,9 +3,7 @@ import struct
 import os
 import csv
 
-# ==============================
-# ====== Global Constants ======
-# ==============================
+
 
 BLOCK_SIZE = 512
 MAGIC = b"4348PRJ3"
@@ -15,9 +13,7 @@ MAX_KEY_COUNT = 2 * T - 1   # 19
 MAX_CHILD_COUNT = 2 * T     # 20
 
 
-# ==============================
-# ===== File Block Helpers =====
-# ==============================
+
 
 def block_read(fh, blk):
     fh.seek(blk * BLOCK_SIZE)
@@ -34,9 +30,6 @@ def block_write(fh, blk, buf):
     fh.write(buf + b"\x00" * (BLOCK_SIZE - len(buf)))
 
 
-# ==============================
-# ========== Header ============
-# ==============================
 
 class Header:
     def __init__(self, root=0, next_id=1):
@@ -54,9 +47,6 @@ class Header:
         return Header(r, nxt)
 
 
-# ==============================
-# ============ Node ============
-# ==============================
 
 class Node:
     def __init__(self, blk, parent=0):
@@ -91,9 +81,7 @@ class Node:
         return n
 
 
-# ==============================
-# ======= Tree Operations ======
-# ==============================
+
 
 # ---- Load or create root ----
 def new_root_node(header, fh, key, val):
@@ -246,9 +234,6 @@ def traverse(fh, blk, out_list=None):
         traverse(fh, kids[len(keys)], out_list)
 
 
-# ==============================
-# ======= Commands =============
-# ==============================
 
 def cmd_create(path):
     if os.path.exists(path):
@@ -379,9 +364,6 @@ def cmd_search(path, k):
     search_file(path, k)
 
 
-# ==============================
-# ============ Main ============
-# ==============================
 
 def main():
     if len(sys.argv) < 2:
