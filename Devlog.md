@@ -85,3 +85,18 @@ Plan
 
 Implement print and extract using traversal results.
 Implement load by reading CSV and calling insert repeatedly.
+
+# Session 8 - DEC 10, 5:45 PM
+
+Thoughts
+
+Everything works; only command routing is left.
+This part is simple but required for program usability.
+
+Plan
+
+Write the main() command parser for all operations.
+Finalize file and ensure commands behave exactly as required.
+Change the code a bit, make it reader friendly.
+Verified the code, checked if everything is there including all the functions.
+Next I will do some testing

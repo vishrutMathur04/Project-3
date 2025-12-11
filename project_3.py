@@ -1,313 +1,434 @@
-import sys, struct, os, csv
+import sys
+import struct
+import os
+import csv
+
+# ==============================
+# ====== Global Constants ======
+# ==============================
 
 BLOCK_SIZE = 512
-MAGIC_NUMBER = b'4348PRJ3'
+MAGIC = b"4348PRJ3"
 
-def read_bytes(f, block_id):
-    f.seek(block_id * BLOCK_SIZE)
-    data = f.read(BLOCK_SIZE)
-    if len(data) < BLOCK_SIZE:
-        raise ValueError("Block read incomplete")
+T = 10                      # minimal degree
+MAX_KEY_COUNT = 2 * T - 1   # 19
+MAX_CHILD_COUNT = 2 * T     # 20
+
+
+# ==============================
+# ===== File Block Helpers =====
+# ==============================
+
+def block_read(fh, blk):
+    fh.seek(blk * BLOCK_SIZE)
+    data = fh.read(BLOCK_SIZE)
+    if len(data) != BLOCK_SIZE:
+        raise ValueError(f"Incomplete block read at {blk}")
     return data
 
-def write_bytes(f, block_id, data):
-    if len(data) > BLOCK_SIZE:
-        raise ValueError("Too large block write")
-    f.seek(block_id * BLOCK_SIZE)
-    f.write(data + b'\x00' * (BLOCK_SIZE - len(data)))
+
+def block_write(fh, blk, buf):
+    if len(buf) > BLOCK_SIZE:
+        raise ValueError("Block overflow")
+    fh.seek(blk * BLOCK_SIZE)
+    fh.write(buf + b"\x00" * (BLOCK_SIZE - len(buf)))
+
+
+# ==============================
+# ========== Header ============
+# ==============================
 
 class Header:
-    def __init__(self, root_id=0, next_block_id=1):
-        self.root_id = root_id
-        self.next_block_id = next_block_id
+    def __init__(self, root=0, next_id=1):
+        self.root = root
+        self.next_id = next_id
 
-    def to_bytes(self):
-        return struct.pack(">8sQQ", MAGIC_NUMBER, self.root_id, self.next_block_id)
+    def encode(self):
+        return struct.pack(">8sQQ", MAGIC, self.root, self.next_id)
 
-    @classmethod
-    def from_bytes(cls, data):
-        magic, r, n = struct.unpack(">8sQQ", data[:24])
-        if magic != MAGIC_NUMBER:
-            raise ValueError("Invalid magic")
-        return cls(r, n)
+    @staticmethod
+    def decode(raw):
+        magic, r, nxt = struct.unpack(">8sQQ", raw[:24])
+        if magic != MAGIC:
+            raise ValueError("Invalid header magic")
+        return Header(r, nxt)
 
 
-
-DEGREE = 10
-MAX_KEYS = 19
-MAX_CHILDREN = 20
+# ==============================
+# ============ Node ============
+# ==============================
 
 class Node:
-    def __init__(self, block_id, parent_id=0):
-        self.block_id = block_id
-        self.parent_id = parent_id
-        self.num_keys = 0
-        self.keys = [0]*MAX_KEYS
-        self.values = [0]*MAX_KEYS
-        self.children = [0]*MAX_CHILDREN
+    def __init__(self, blk, parent=0):
+        self.id = blk
+        self.parent = parent
+        self.count = 0
+        self.keys = [0] * MAX_KEY_COUNT
+        self.vals = [0] * MAX_KEY_COUNT
+        self.children = [0] * MAX_CHILD_COUNT
 
-    def is_leaf(self):
+    def leaf(self):
         return self.children[0] == 0
 
-    def to_bytes(self):
-        buf = struct.pack(">QQQ", self.block_id, self.parent_id, self.num_keys)
-        buf += struct.pack(f">{MAX_KEYS}Q", *self.keys)
-        buf += struct.pack(f">{MAX_KEYS}Q", *self.values)
-        buf += struct.pack(f">{MAX_CHILDREN}Q", *self.children)
-        return buf
+    def encode(self):
+        out = struct.pack(">QQQ", self.id, self.parent, self.count)
+        out += struct.pack(f">{MAX_KEY_COUNT}Q", *self.keys)
+        out += struct.pack(f">{MAX_KEY_COUNT}Q", *self.vals)
+        out += struct.pack(f">{MAX_CHILD_COUNT}Q", *self.children)
+        return out
 
-    @classmethod
-    def from_bytes(cls, data):
-        bid, pid, nk = struct.unpack(">QQQ", data[:24])
-        node = cls(bid, pid)
-        node.num_keys = nk
-        off = 24
-        node.keys = list(struct.unpack(f">{MAX_KEYS}Q", data[off:off+MAX_KEYS*8]))
-        off += MAX_KEYS*8
-        node.values = list(struct.unpack(f">{MAX_KEYS}Q", data[off:off+MAX_KEYS*8]))
-        off += MAX_KEYS*8
-        node.children = list(struct.unpack(f">{MAX_CHILDREN}Q", data[off:off+MAX_CHILDREN*8]))
-        return node
+    @staticmethod
+    def decode(raw):
+        blk, parent, ct = struct.unpack(">QQQ", raw[:24])
+        n = Node(blk, parent)
+        n.count = ct
+        offset = 24
+        n.keys = list(struct.unpack(f">{MAX_KEY_COUNT}Q", raw[offset: offset + MAX_KEY_COUNT * 8]))
+        offset += MAX_KEY_COUNT * 8
+        n.vals = list(struct.unpack(f">{MAX_KEY_COUNT}Q", raw[offset: offset + MAX_KEY_COUNT * 8]))
+        offset += MAX_KEY_COUNT * 8
+        n.children = list(struct.unpack(f">{MAX_CHILD_COUNT}Q", raw[offset: offset + MAX_CHILD_COUNT * 8]))
+        return n
 
-    # (previous code unchanged above)
 
-    def cmd_create(filename):
-        if os.path.exists(filename):
-            print("Error: File exists.")
-            sys.exit(1)
-        with open(filename, "wb") as f:
-            h = Header()
-            write_bytes(f, 0, h.to_bytes())
+# ==============================
+# ======= Tree Operations ======
+# ==============================
 
-    def cmd_insert(filename, key, value):
-        if not os.path.exists(filename):
-            print("Error: File missing.")
-            sys.exit(1)
+# ---- Load or create root ----
+def new_root_node(header, fh, key, val):
+    root_id = header.next_id
+    header.next_id += 1
+    node = Node(root_id)
+    node.count = 1
+    node.keys[0] = key
+    node.vals[0] = val
+    header.root = root_id
+    block_write(fh, root_id, node.encode())
+    block_write(fh, 0, header.encode())
 
-        with open(filename, "r+b") as f:
-            h = Header.from_bytes(read_bytes(f, 0))
 
-            # empty tree
-            if h.root_id == 0:
-                rid = h.next_block_id
-                root = Node(rid)
-                root.num_keys = 1
-                root.keys[0] = key
-                root.values[0] = value
-                h.root_id = rid
-                h.next_block_id += 1
-                write_bytes(f, rid, root.to_bytes())
-                write_bytes(f, 0, h.to_bytes())
-                return
+# ---- Insert operations ----
 
-    
+def split(fh, header, parent, idx, child):
+    median = T - 1
 
-    def split_child(f, header, parent, i, child):
-        z_id = header.next_block_id
-        header.next_block_id += 1
-        z = Node(z_id, parent.block_id)
+    right_id = header.next_id
+    header.next_id += 1
+    right = Node(right_id, parent.id)
 
-        median = DEGREE - 1  # index 9
+    # move upper half keys/vals
+    right.count = T - 1
+    for j in range(T - 1):
+        right.keys[j] = child.keys[j + T]
+        right.vals[j] = child.vals[j + T]
+        child.keys[j + T] = 0
+        child.vals[j + T] = 0
 
-        # move keys
-        z.num_keys = DEGREE - 1
-        for j in range(DEGREE-1):
-            z.keys[j] = child.keys[j+DEGREE]
-            z.values[j] = child.values[j+DEGREE]
-            child.keys[j+DEGREE] = 0
-            child.values[j+DEGREE] = 0
+    # move children (if not leaf)
+    if not child.leaf():
+        for j in range(T):
+            right.children[j] = child.children[j + T]
+            child.children[j + T] = 0
 
-        # move children
-        if not child.is_leaf():
-            for j in range(DEGREE):
-                z.children[j] = child.children[j+DEGREE]
-                child.children[j+DEGREE] = 0
+    child.count = T - 1
 
-        child.num_keys = DEGREE - 1
+    # shift parent children
+    for j in range(parent.count, idx, -1):
+        parent.children[j + 1] = parent.children[j]
+    parent.children[idx + 1] = right_id
 
-        # shift parent children
-        for j in range(parent.num_keys, i, -1):
-            parent.children[j+1] = parent.children[j]
-        parent.children[i+1] = z_id
+    # shift parent keys
+    for j in range(parent.count, idx, -1):
+        parent.keys[j] = parent.keys[j - 1]
+        parent.vals[j] = parent.vals[j - 1]
 
-        # shift parent keys
-        for j in range(parent.num_keys, i, -1):
-            parent.keys[j] = parent.keys[j-1]
-            parent.values[j] = parent.values[j-1]
+    # move median up
+    parent.keys[idx] = child.keys[median]
+    parent.vals[idx] = child.vals[median]
+    child.keys[median] = 0
+    child.vals[median] = 0
+    parent.count += 1
 
-        parent.keys[i] = child.keys[median]
-        parent.values[i] = child.values[median]
-        parent.num_keys += 1
+    # write changes
+    block_write(fh, 0, header.encode())
+    block_write(fh, child.id, child.encode())
+    block_write(fh, right.id, right.encode())
+    block_write(fh, parent.id, parent.encode())
 
-        child.keys[median] = 0
-        child.values[median] = 0
 
-        write_bytes(f, 0, header.to_bytes())
-        write_bytes(f, child.block_id, child.to_bytes())
-        write_bytes(f, z.block_id, z.to_bytes())
-        write_bytes(f, parent.block_id, parent.to_bytes())
+def insert_nonfull(fh, header, node, k, v):
+    i = node.count - 1
 
-    def insert_non_full(f, header, node, key, value):
-        i = node.num_keys - 1
+    if node.leaf():
+        while i >= 0 and k < node.keys[i]:
+            node.keys[i + 1] = node.keys[i]
+            node.vals[i + 1] = node.vals[i]
+            i -= 1
+        node.keys[i + 1] = k
+        node.vals[i + 1] = v
+        node.count += 1
+        block_write(fh, node.id, node.encode())
+        return
 
-        if node.is_leaf():
-            while i >= 0 and key < node.keys[i]:
-                node.keys[i+1] = node.keys[i]
-                node.values[i+1] = node.values[i]
-                i -= 1
-            node.keys[i+1] = key
-            node.values[i+1] = value
-            node.num_keys += 1
-            write_bytes(f, node.block_id, node.to_bytes())
-        else:
-            while i >= 0 and key < node.keys[i]:
-                i -= 1
+    while i >= 0 and k < node.keys[i]:
+        i -= 1
+    i += 1
+
+    child_id = node.children[i]
+    child = Node.decode(block_read(fh, child_id))
+
+    if child.count == MAX_KEY_COUNT:
+        split(fh, header, node, i, child)
+        if k > node.keys[i]:
             i += 1
-            cid = node.children[i]
-            child = Node.from_bytes(read_bytes(f, cid))
+        child = Node.decode(block_read(fh, node.children[i]))
 
-            if child.num_keys == MAX_KEYS:
-                split_child(f, header, node, i, child)
-                if key > node.keys[i]:
-                    i += 1
-                cid = node.children[i]
-                child = Node.from_bytes(read_bytes(f, cid))
+    insert_nonfull(fh, header, child, k, v)
 
-            insert_non_full(f, header, child, key, value)
 
-            
+# ---- Search ----
 
-    def cmd_insert(filename, key, value):
-        if not os.path.exists(filename):
-            print("Error: File missing.")
-            sys.exit(1)
-
-        with open(filename, "r+b") as f:
-            header = Header.from_bytes(read_bytes(f, 0))
-
-            if header.root_id == 0:
-                rid = header.next_block_id
-                header.next_block_id += 1
-                root = Node(rid)
-                root.num_keys = 1
-                root.keys[0] = key
-                root.values[0] = value
-                header.root_id = rid
-                write_bytes(f, rid, root.to_bytes())
-                write_bytes(f, 0, header.to_bytes())
-                return
-
-            root = Node.from_bytes(read_bytes(f, header.root_id))
-
-            if root.num_keys == MAX_KEYS:
-                new_root_id = header.next_block_id
-                header.next_block_id += 1
-                new_root = Node(new_root_id)
-                new_root.children[0] = root.block_id
-                root.parent_id = new_root_id
-                header.root_id = new_root_id
-
-                write_bytes(f, 0, header.to_bytes())
-                write_bytes(f, new_root_id, new_root.to_bytes())
-
-                split_child(f, header, new_root, 0, root)
-                insert_non_full(f, header, new_root, key, value)
-            else:
-                insert_non_full(f, header, root, key, value)
-                def cmd_search(filename, key):
+def search_file(filename, k):
     if not os.path.exists(filename):
         print("Error: File not found.")
-        sys.exit(1)
+        return
 
-    with open(filename, "rb") as f:
-        h = Header.from_bytes(read_bytes(f, 0))
-        if h.root_id == 0:
+    with open(filename, "rb") as fh:
+        try:
+            header = Header.decode(block_read(fh, 0))
+        except:
+            print("Error: Invalid index file.")
+            return
+
+        if header.root == 0:
             print("Error: Key not found.")
             return
 
-        cid = h.root_id
+        cur = header.root
         while True:
-            node = Node.from_bytes(read_bytes(f, cid))
+            node = Node.decode(block_read(fh, cur))
             i = 0
-            while i < node.num_keys and key > node.keys[i]:
+            while i < node.count and k > node.keys[i]:
                 i += 1
-            if i < node.num_keys and node.keys[i] == key:
-                print(f"{node.keys[i]}: {node.values[i]}")
+
+            if i < node.count and k == node.keys[i]:
+                print(f"{node.keys[i]}: {node.vals[i]}")
                 return
-            if node.is_leaf():
+
+            if node.leaf():
                 print("Error: Key not found.")
                 return
-            cid = node.children[i]
 
-    def traversal_helper(f, block_id, out=None):
-        if block_id == 0:
+            cur = node.children[i]
+
+
+# ---- Traversal ----
+
+def traverse(fh, blk, out_list=None):
+    if blk == 0:
+        return
+    n = Node.decode(block_read(fh, blk))
+    keys = n.keys[:n.count]
+    vals = n.vals[:n.count]
+    kids = n.children[:n.count + 1]
+    lf = n.leaf()
+
+    for i in range(len(keys)):
+        if not lf:
+            traverse(fh, kids[i], out_list)
+        if out_list is None:
+            print(f"{keys[i]}: {vals[i]}")
+        else:
+            out_list.append((keys[i], vals[i]))
+
+    if not lf:
+        traverse(fh, kids[len(keys)], out_list)
+
+
+# ==============================
+# ======= Commands =============
+# ==============================
+
+def cmd_create(path):
+    if os.path.exists(path):
+        print(f"Error: File {path} already exists.")
+        return
+    with open(path, "wb") as fh:
+        hdr = Header()
+        block_write(fh, 0, hdr.encode())
+
+
+def cmd_insert(path, k, v):
+    if not os.path.exists(path):
+        print("Error: File does not exist.")
+        return
+
+    with open(path, "r+b") as fh:
+        try:
+            header = Header.decode(block_read(fh, 0))
+        except:
+            print("Error: Invalid index file.")
             return
-        node = Node.from_bytes(read_bytes(f, block_id))
 
-        keys = node.keys[:node.num_keys]
-        values = node.values[:node.num_keys]
-        children = node.children[:node.num_keys+1]
-        leaf = node.is_leaf()
+        # empty tree
+        if header.root == 0:
+            new_root_node(header, fh, k, v)
+            return
 
-        for i in range(len(keys)):
-            if not leaf:
-                traversal_helper(f, children[i], out)
-            if out is None:
-                print(f"{keys[i]}: {values[i]}")
-            else:
-                out.append((keys[i], values[i]))
-        if not leaf:
-            traversal_helper(f, children[len(keys)], out)
+        root = Node.decode(block_read(fh, header.root))
+
+        if root.count == MAX_KEY_COUNT:
+            new_root_id = header.next_id
+            header.next_id += 1
+
+            nr = Node(new_root_id)
+            nr.children[0] = root.id
+            root.parent = new_root_id
+            header.root = new_root_id
+
+            block_write(fh, 0, header.encode())
+            block_write(fh, new_root_id, nr.encode())
+            block_write(fh, root.id, root.encode())
+
+            split(fh, header, nr, 0, root)
+            insert_nonfull(fh, header, nr, k, v)
+        else:
+            insert_nonfull(fh, header, root, k, v)
 
 
-            def cmd_print(filename):
-    if not os.path.exists(filename):
+def cmd_print(path):
+    if not os.path.exists(path):
         print("Error: File not found.")
-        sys.exit(1)
-    with open(filename, "rb") as f:
-        h = Header.from_bytes(read_bytes(f, 0))
-        if h.root_id != 0:
-            traversal_helper(f, h.root_id)
+        return
 
-    def cmd_extract(filename, out_csv):
-        if not os.path.exists(filename):
-            print("Error: File missing.")
-            sys.exit(1)
-        if os.path.exists(out_csv):
-            print("Error: CSV exists.")
-            sys.exit(1)
+    with open(path, "rb") as fh:
+        try:
+            header = Header.decode(block_read(fh, 0))
+        except:
+            print("Error: Invalid index file.")
+            return
 
-        results = []
-        with open(filename, "rb") as f:
-            h = Header.from_bytes(read_bytes(f, 0))
-            if h.root_id != 0:
-                traversal_helper(f, h.root_id, results)
+        if header.root != 0:
+            traverse(fh, header.root, None)
 
-        with open(out_csv, "w", newline="") as f:
-            w = csv.writer(f)
-            for k, v in results:
-                w.writerow([k, v])
 
-    def cmd_load(filename, csv_file):
-        if not os.path.exists(filename):
-            print("Error: File missing.")
-            sys.exit(1)
-        if not os.path.exists(csv_file):
-            print("Error: CSV missing.")
-            sys.exit(1)
+def cmd_extract(path, out_csv):
+    if not os.path.exists(path):
+        print("Error: File not found.")
+        return
+    if os.path.exists(out_csv):
+        print(f"Error: File {out_csv} already exists.")
+        return
 
-        pairs = []
-        with open(csv_file) as f:
-            r = csv.reader(f)
-            for row in r:
-                if row:
-                    pairs.append((int(row[0]), int(row[1])))
+    out = []
+    with open(path, "rb") as fh:
+        header = Header.decode(block_read(fh, 0))
+        if header.root != 0:
+            traverse(fh, header.root, out)
+
+    with open(out_csv, "w", newline="") as c:
+        w = csv.writer(c)
+        for k, v in out:
+            w.writerow([k, v])
+
+
+def cmd_load(path, csvfile):
+    if not os.path.exists(path):
+        print("Error: File not found.")
+        return
+    if not os.path.exists(csvfile):
+        print("Error: CSV file not found.")
+        return
+
+    pairs = []
+    with open(csvfile) as f:
+        for row in csv.reader(f):
+            if row:
+                pairs.append((int(row[0]), int(row[1])))
+
+    with open(path, "r+b") as fh:
+        header = Header.decode(block_read(fh, 0))
 
         for k, v in pairs:
-            cmd_insert(filename, k, v)
+            if header.root == 0:
+                new_root_node(header, fh, k, v)
+                header = Header.decode(block_read(fh, 0))
+            else:
+                root = Node.decode(block_read(fh, header.root))
+                if root.count == MAX_KEY_COUNT:
+                    new_root_id = header.next_id
+                    header.next_id += 1
+                    nr = Node(new_root_id)
+                    nr.children[0] = root.id
+                    root.parent = new_root_id
+                    header.root = new_root_id
+                    block_write(fh, 0, header.encode())
+                    block_write(fh, new_root_id, nr.encode())
+                    block_write(fh, root.id, root.encode())
+                    split(fh, header, nr, 0, root)
+                    insert_nonfull(fh, header, nr, k, v)
+                else:
+                    insert_nonfull(fh, header, root, k, v)
+
+            # refresh header in case root changed
+            header = Header.decode(block_read(fh, 0))
 
 
+def cmd_search(path, k):
+    search_file(path, k)
 
 
+# ==============================
+# ============ Main ============
+# ==============================
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: project3 <command> ...")
+        return
+
+    cmd = sys.argv[1]
+
+    if cmd == "create":
+        if len(sys.argv) != 3:
+            print("Usage: project3 create <index>")
+            return
+        cmd_create(sys.argv[2])
+
+    elif cmd == "insert":
+        if len(sys.argv) != 5:
+            print("Usage: project3 insert <file> <key> <value>")
+            return
+        cmd_insert(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+
+    elif cmd == "search":
+        if len(sys.argv) != 4:
+            print("Usage: project3 search <file> <key>")
+            return
+        cmd_search(sys.argv[2], int(sys.argv[3]))
+
+    elif cmd == "print":
+        if len(sys.argv) != 3:
+            print("Usage: project3 print <file>")
+            return
+        cmd_print(sys.argv[2])
+
+    elif cmd == "extract":
+        if len(sys.argv) != 4:
+            print("Usage: project3 extract <file> <csv>")
+            return
+        cmd_extract(sys.argv[2], sys.argv[3])
+
+    elif cmd == "load":
+        if len(sys.argv) != 4:
+            print("Usage: project3 load <file> <csv>")
+            return
+        cmd_load(sys.argv[2], sys.argv[3])
+
+    else:
+        print("Unknown command.")
 
 
+if __name__ == "__main__":
+    main()
